@@ -122,6 +122,11 @@ TERM_WIDTH=$(tput cols 2>/dev/null || echo 80)
 AVAIL_BEFORE=""
 MODE=""
 JSON_OUTPUT=false
+OS_ID=""
+OS_VERSION_ID=""
+INIT_SYSTEM=""
+PACKAGE_MANAGER=""
+AVAILABLE_TOOLS=()
 
 # =============================================================================
 # Terminal capabilities
@@ -477,13 +482,139 @@ check_command() {
 }
 
 detect_distribution() {
-    if [[ -f /etc/os-release ]]; then
+    local os_release_file="${OS_RELEASE_FILE:-/etc/os-release}"
+    if [[ -f "$os_release_file" ]]; then
         # shellcheck source=/dev/null
-        . /etc/os-release
+        . "$os_release_file"
         echo "$ID"
     else
         echo "unknown"
     fi
+}
+
+detect_os() {
+    local os_release_file="${OS_RELEASE_FILE:-/etc/os-release}"
+    OS_ID="unknown"
+    OS_VERSION_ID=""
+    if [[ -r "$os_release_file" ]]; then
+        # shellcheck source=/dev/null
+        . "$os_release_file"
+        OS_ID="${ID:-unknown}"
+        OS_VERSION_ID="${VERSION_ID:-}"
+    fi
+    printf '%s\n' "$OS_ID"
+}
+
+detect_init_system() {
+    if [[ -d /run/systemd/system ]] && command -v systemctl >/dev/null 2>&1; then
+        INIT_SYSTEM="systemd"
+    elif command -v openrc >/dev/null 2>&1 || [[ -d /run/openrc ]]; then
+        INIT_SYSTEM="openrc"
+    elif command -v s6-svscan >/dev/null 2>&1; then
+        INIT_SYSTEM="s6"
+    elif [[ -d /etc/runit ]] || command -v runit >/dev/null 2>&1; then
+        INIT_SYSTEM="runit"
+    else
+        INIT_SYSTEM="unknown"
+    fi
+    printf '%s\n' "$INIT_SYSTEM"
+}
+
+detect_available_tools() {
+    AVAILABLE_TOOLS=()
+    local tool
+    for tool in df du find lsof apt apt-get dpkg dnf pacman apk journalctl systemctl flatpak snap; do
+        if command -v "$tool" >/dev/null 2>&1; then
+            AVAILABLE_TOOLS+=("$tool")
+        fi
+    done
+    printf '%s\n' "${AVAILABLE_TOOLS[@]}"
+}
+
+detect_package_manager() {
+    local os_id="${OS_ID:-}"
+    [[ -n "$os_id" ]] || os_id=$(detect_os)
+    PACKAGE_MANAGER="none"
+
+    case "$os_id" in
+        debian|ubuntu|linuxmint|mint|pop|kali|parrot)
+            command -v apt-get >/dev/null 2>&1 && PACKAGE_MANAGER="apt"
+            ;;
+        fedora|rhel|centos|rocky|almalinux|ol|nobara)
+            if command -v dnf >/dev/null 2>&1; then
+                PACKAGE_MANAGER="dnf"
+            elif command -v yum >/dev/null 2>&1; then
+                PACKAGE_MANAGER="dnf"
+            fi
+            ;;
+        arch|manjaro|endeavouros)
+            command -v pacman >/dev/null 2>&1 && PACKAGE_MANAGER="pacman"
+            ;;
+        alpine)
+            command -v apk >/dev/null 2>&1 && PACKAGE_MANAGER="apk"
+            ;;
+    esac
+
+    # Do not claim an adapter based on the distribution alone. This also
+    # supports derivatives whose ID is not in the list above.
+    if [[ "$PACKAGE_MANAGER" == "none" ]]; then
+        if command -v apt-get >/dev/null 2>&1 && command -v dpkg >/dev/null 2>&1; then
+            PACKAGE_MANAGER="apt"
+        elif command -v dnf >/dev/null 2>&1 || command -v yum >/dev/null 2>&1; then
+            PACKAGE_MANAGER="dnf"
+        elif command -v pacman >/dev/null 2>&1; then
+            PACKAGE_MANAGER="pacman"
+        elif command -v apk >/dev/null 2>&1; then
+            PACKAGE_MANAGER="apk"
+        fi
+    fi
+    printf '%s\n' "$PACKAGE_MANAGER"
+}
+
+package_manager_name() {
+    case "${PACKAGE_MANAGER:-none}" in
+        apt) printf 'APT\n' ;;
+        dnf) printf 'DNF/YUM\n' ;;
+        pacman) printf 'Pacman\n' ;;
+        apk) printf 'APK\n' ;;
+        *) printf 'none\n' ;;
+    esac
+}
+
+package_manager_cache_path() {
+    case "${PACKAGE_MANAGER:-none}" in
+        apt) printf '/var/cache/apt/archives\n' ;;
+        dnf) printf '/var/cache/dnf\n' ;;
+        pacman) printf '/var/cache/pacman/pkg\n' ;;
+        apk) printf '/var/cache/apk\n' ;;
+        *) printf '\n' ;;
+    esac
+}
+
+package_manager_clean_cache() {
+    case "${PACKAGE_MANAGER:-none}" in
+        apt)
+            apt-get clean
+            apt-get autoclean
+            ;;
+        dnf)
+            if command -v dnf >/dev/null 2>&1; then
+                dnf clean packages
+            else
+                yum clean packages
+            fi
+            ;;
+        pacman)
+            pacman -Sc --noconfirm
+            ;;
+        apk)
+            apk cache clean
+            ;;
+        *)
+            log_message "WARNING" "No supported package-manager adapter is available"
+            return "$EXIT_UNSUPPORTED"
+            ;;
+    esac
 }
 
 get_system_info() {
@@ -533,6 +664,10 @@ show_header() {
     kernel=$(uname -r)
     local arch
     arch=$(uname -m)
+    local package_manager
+    package_manager=$(package_manager_name)
+    local init_system
+    init_system="${INIT_SYSTEM:-$(detect_init_system)}"
     local current_date
     current_date=$(date '+%Y-%m-%d %H:%M:%S')
     local distro_icon
@@ -563,6 +698,7 @@ show_header() {
     echo -e "${WHITE}${BOLD}SYSTEM INFORMATION${NC}"
     echo -e "  ${distro_icon} ${BOLD}Distribution:${NC} ${GREEN}$distro${NC} | ${disk_icon} ${BOLD}Kernel:${NC} ${GREEN}$kernel${NC}"
     echo -e "  ${computer_icon} ${BOLD}System Type:${NC} ${GREEN}$sys_type${NC} | ${info_icon} ${BOLD}Architecture:${NC} ${GREEN}$arch${NC}"
+    echo -e "  ${info_icon} ${BOLD}Package Manager:${NC} ${GREEN}$package_manager${NC} | ${info_icon} ${BOLD}Init:${NC} ${GREEN}$init_system${NC}"
     echo -e "  ${clock_icon} ${BOLD}Date & Time:${NC} ${GREEN}$current_date${NC}"
     echo
     # Safety policy — technically defensible claims only
@@ -604,6 +740,11 @@ preflight_checks() {
         fi
     fi
 
+    detect_os >/dev/null
+    detect_init_system >/dev/null
+    detect_available_tools >/dev/null
+    detect_package_manager >/dev/null
+
     # Check required commands — only require what this system actually needs
     local required_commands=("df" "du" "find")
     if [[ "$mode" != "--user-only" ]]; then
@@ -616,6 +757,11 @@ preflight_checks() {
     for cmd in "${required_commands[@]}"; do
         check_command "$cmd" || exit "$EXIT_UNSUPPORTED"
     done
+
+    if [[ "$mode" != "--user-only" && "$PACKAGE_MANAGER" == "none" ]]; then
+        echo -e "${YELLOW}No supported package manager detected; package cleanup will be skipped.${NC}"
+        log_message "WARNING" "No supported package manager detected; running in degraded mode"
+    fi
 
     # Check disk space
     local disk_info
@@ -729,11 +875,13 @@ show_disk_summary() {
         snap_icon="📱"
     fi
 
-    # APT Cache
-    if command -v apt >/dev/null 2>&1; then
-        local apt_cache_size
-        apt_cache_size=$(get_dir_size "/var/cache/apt/archives")
-        echo -e "  ${pkg_icon} APT Cache:           ${CYAN}$(bytes_to_human "$apt_cache_size")${NC}"
+    # Package cache
+    local package_cache_path
+    package_cache_path=$(package_manager_cache_path)
+    if [[ -n "$package_cache_path" ]]; then
+        local package_cache_size
+        package_cache_size=$(get_dir_size "$package_cache_path")
+        echo -e "  ${pkg_icon} $(package_manager_name) Cache:      ${CYAN}$(bytes_to_human "$package_cache_size")${NC}"
     fi
 
     # System Logs
@@ -957,17 +1105,19 @@ cleanup_postgres_logs() {
 
 # Clean APT package cache
 cleanup_apt_cache() {
-    module_start "APT" "Cleaning Package Cache..."
+    module_start "PACKAGE" "Cleaning Package Cache..."
 
-    if ! check_command "apt"; then
-        module_skip "APT" "APT not available on this system"
+    local cache_path
+    cache_path=$(package_manager_cache_path)
+    if [[ "$PACKAGE_MANAGER" == "none" || -z "$cache_path" ]]; then
+        module_skip "Package cache" "No supported package-manager adapter is available"
         return 0
     fi
 
     local cache_size_before
-    cache_size_before=$(get_dir_size "/var/cache/apt/archives")
+    cache_size_before=$(get_dir_size "$cache_path")
 
-    echo -e "${CYAN}Current APT cache size: $(bytes_to_human "$cache_size_before")${NC}"
+    echo -e "${CYAN}Current $(package_manager_name) cache size: $(bytes_to_human "$cache_size_before")${NC}"
 
     if [[ $cache_size_before -gt 104857600 ]]; then  # > 100MB
         if ! module_confirm "APT cache" "$cache_size_before" "This will clear downloaded package files. Continue?"; then
@@ -975,20 +1125,22 @@ cleanup_apt_cache() {
         fi
 
         if [[ "$DRY_RUN" != true ]]; then
-            # No sudo — the script is already running as root
-            apt clean 2>/dev/null || log_message "WARNING" "apt clean failed"
-            apt autoclean 2>/dev/null || log_message "WARNING" "apt autoclean failed"
+            if ! package_manager_clean_cache 2>/dev/null; then
+                log_message "WARNING" "$(package_manager_name) cache cleanup failed"
+                MODULES_FAILED=$((MODULES_FAILED + 1))
+                return "$EXIT_FAILED"
+            fi
         else
-            echo -e "  ${YELLOW}[DRY RUN]${NC} Would run: apt clean, apt autoclean"
+            echo -e "  ${YELLOW}[DRY RUN]${NC} Would clean the $(package_manager_name) package cache"
         fi
 
         local cache_size_after
-        cache_size_after=$(get_dir_size "/var/cache/apt/archives")
+        cache_size_after=$(get_dir_size "$cache_path")
         local freed=$((cache_size_before - cache_size_after))
 
-        module_end "APT Cache" "$freed"
+        module_end "$(package_manager_name) Cache" "$freed"
     else
-        module_skip "APT Cache" "Already small ($(bytes_to_human "$cache_size_before"))"
+        module_skip "Package Cache" "Already small ($(bytes_to_human "$cache_size_before"))"
     fi
 }
 
@@ -1388,9 +1540,9 @@ cleanup_pentesting_tools() {
 cleanup_old_kernels() {
     module_start "KERNEL" "Managing Kernel Versions..."
 
-    # Guard: only works on APT-based systems
-    if ! command -v dpkg >/dev/null 2>&1; then
-        module_skip "Kernel cleanup" "dpkg not available (non-Debian system)"
+    # Kernel removal is intentionally limited to the verified APT workflow.
+    if [[ "$PACKAGE_MANAGER" != "apt" ]] || ! command -v dpkg >/dev/null 2>&1; then
+        module_skip "Kernel cleanup" "Kernel adapter is only available for APT systems"
         return 0
     fi
 
@@ -2102,7 +2254,7 @@ user_only_cleanup() {
 }
 
 # =============================================================================
-# Analyze (Phase 2 stub — non-destructive)
+# Analyze (non-destructive)
 # =============================================================================
 
 run_analyze() {
@@ -2124,11 +2276,13 @@ run_analyze() {
     echo -e "\n${BOLD}${PURPLE}Cleanup Opportunities:${NC}"
     local total_potential=0
 
-    if command -v apt >/dev/null 2>&1; then
-        local apt_size
-        apt_size=$(get_dir_size "/var/cache/apt/archives")
-        echo -e "  APT cache:          ${CYAN}$(bytes_to_human "$apt_size")${NC}"
-        total_potential=$((total_potential + apt_size))
+    local package_cache_path
+    package_cache_path=$(package_manager_cache_path)
+    if [[ -n "$package_cache_path" ]]; then
+        local package_cache_size
+        package_cache_size=$(get_dir_size "$package_cache_path")
+        echo -e "  $(package_manager_name) cache:      ${CYAN}$(bytes_to_human "$package_cache_size")${NC}"
+        total_potential=$((total_potential + package_cache_size))
     fi
 
     if command -v journalctl >/dev/null 2>&1; then
@@ -2150,7 +2304,10 @@ run_analyze() {
     fi
 
     echo -e "\n  ${BOLD}Potential recovery:   ${GREEN}~$(bytes_to_human $total_potential)${NC}"
-    echo -e "\n${BLUE}Run with --clean to perform cleanup.${NC}"
+    if [[ "$PACKAGE_MANAGER" == "none" ]]; then
+        echo -e "\n${YELLOW}No supported package manager was detected; package cleanup is unavailable.${NC}"
+    fi
+    echo -e "\n${BLUE}Run with --quick or --advanced to perform cleanup.${NC}"
 }
 
 # =============================================================================
@@ -2191,7 +2348,7 @@ show_help() {
     echo -e "    • Ubuntu-specific package management"
     echo
     echo -e "  ${PURPLE}${BOLD}All Debian-based Systems:${NC}"
-    echo -e "    • APT cache and orphaned package cleanup"
+    echo -e "    • Supported package-manager cache cleanup (APT, DNF, Pacman, or APK)"
     echo -e "    • Safe kernel version management"
     echo -e "    • System log rotation and cleanup"
     echo
@@ -2353,6 +2510,10 @@ run_preflight() {
     fi
 
     if [[ "$MODE" != "help" ]]; then
+        detect_os >/dev/null
+        detect_init_system >/dev/null
+        detect_available_tools >/dev/null
+        detect_package_manager >/dev/null
         show_header
         if [[ "$MODE" == "user-only" ]]; then
             preflight_checks "--user-only"

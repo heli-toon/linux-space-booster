@@ -2,9 +2,10 @@
 
 test:
 	bash tests/test_phase1.sh
+	bash tests/test_phase2.sh
 
 shellcheck:
 	@command -v shellcheck >/dev/null 2>&1 || { echo "ShellCheck is not installed"; exit 1; }
-	shellcheck -x linux_space_booster.sh tests/test_phase1.sh
+	shellcheck -x linux_space_booster.sh tests/test_phase1.sh tests/test_phase2.sh
 
 check: test

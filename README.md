@@ -127,13 +127,15 @@ Linux Space Booster includes multiple layers of protection to ensure your system
 - **Configuration Safety**: System and tool configurations are protected
 - **Kernel Safety**: Current and recent kernels are always preserved
 
-## 💻 Supported Distributions
+## 💻 Supported Platforms
 
-- **Kali Linux**: Specialized cleaning for penetration testing tools
-- **Parrot OS**: Optimized for security tools and configurations
-- **Ubuntu**: Enhanced cleaning for desktop environments
-- **Linux Mint**: Tailored for Mint-specific packages and caches
-- **Debian**: Core system optimization for Debian-based distributions
+The script now detects the host OS, init system, and package manager before running package-cleanup actions.
+
+- **Debian family**: APT adapter verified for Debian, Ubuntu, Kali, Mint, and other Debian-derived systems
+- **RPM family**: DNF/YUM adapter available when the host exposes a supported package manager
+- **Arch family**: Pacman adapter available when Pacman is installed
+- **Alpine**: APK adapter available when APK is installed
+- **Unsupported systems**: degrade gracefully and skip package-manager cleanup with a clear warning instead of attempting blind commands
 
 ## 📊 Performance
 
