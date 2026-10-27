@@ -1,0 +1,5 @@
+ID=ubuntu
+VERSION_ID="22.04"
+NAME="Ubuntu"
+PRETTY_NAME="Ubuntu 22.04 LTS"
+

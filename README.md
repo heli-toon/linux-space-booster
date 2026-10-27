@@ -25,6 +25,8 @@ With built-in safety checks and distribution-specific optimizations, Linux Space
 - **📊 Detailed Reporting**: Complete cleanup reports with space freed metrics
 - **⚙️ Cross-Distribution Support**: Works on Kali, Parrot, Ubuntu, Mint, and Debian-based systems
 - **🔄 Interactive Interface**: User-friendly menu with interactive confirmations
+- **🧩 Modular Cleanup Engine**: Auditable cleanup modules share one registry,
+  safety layer, and lifecycle for analysis, previews, and execution
 
 ## 🔧 Installation
 
@@ -84,6 +86,13 @@ sudo ./linux-space-booster
 Flags may be supplied in any valid order; for example, `--force --quick` and
 `--quick --force` are equivalent. `--json` is currently accepted only with
 `--analyze`; structured JSON output is planned for a later release.
+
+The cleanup engine currently registers these modules: package cache, system
+logs, temporary files, user caches, browser caches, thumbnails, Snap
+revisions, PostgreSQL logs, penetration-testing tool logs, and old kernels.
+The `--help` output shows each module's category, privilege requirement, and
+risk level. Optional modules are skipped when their tools or paths are not
+available.
 
 ### Examples
 

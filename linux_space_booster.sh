@@ -2038,14 +2038,14 @@ quick_cleanup() {
     echo -e "\n${GREEN}Starting Quick Safe Cleanup...${NC}"
     FORCE_MODE=true
 
-    cleanup_apt_cache
-    cleanup_temp_files
-    cleanup_user_caches
+    run_registered_module "package-cache"
+    run_registered_module "temporary-files"
+    run_registered_module "user-caches"
 
     # Runtime/package removal and specialised tool cleanup stay opt-in through
     # advanced mode. The default path must not remove installed software.
 
-    cleanup_system_logs
+    run_registered_module "system-logs"
 
     generate_report
     FORCE_MODE=false
@@ -2055,13 +2055,13 @@ quick_cleanup() {
 advanced_cleanup() {
     echo -e "\n${YELLOW}Starting Advanced Cleanup...${NC}"
 
-    cleanup_apt_cache
-    cleanup_system_logs
-    cleanup_temp_files
-    cleanup_user_caches
-    cleanup_snap_packages
-    cleanup_pentesting_tools
-    cleanup_old_kernels
+    run_registered_module "package-cache"
+    run_registered_module "system-logs"
+    run_registered_module "temporary-files"
+    run_registered_module "user-caches"
+    run_registered_module "snap"
+    run_registered_module "pentesting-tools"
+    run_registered_module "old-kernels"
 
     generate_report
 }
@@ -2331,6 +2331,14 @@ show_help() {
     echo -e "  ${GREEN}$0 --analyze${NC}               # Analyze disk usage (no changes)"
     echo -e "  ${GREEN}$0 --version${NC}               # Show version"
     echo
+    echo -e "${WHITE}${BOLD}REGISTERED CLEANUP MODULES:${NC}"
+    local module_name
+    for module_name in "${MODULE_NAMES[@]}"; do
+        printf '  %-22s %s/%s (%s risk)\n' "$module_name" \
+            "${MODULE_CATEGORY[$module_name]}" "${MODULE_PRIVILEGE[$module_name]}" \
+            "${MODULE_RISK[$module_name]}"
+    done
+    echo
     echo -e "${WHITE}${BOLD}FLAG COMBINATIONS:${NC}"
     echo -e "  Flags can be combined in any order:"
     echo -e "  ${GREEN}sudo $0 --force --quick${NC}    # same as --quick --force"
@@ -2574,8 +2582,18 @@ dispatch() {
 }
 
 # =============================================================================
-# Main entry point
+# Module definitions and main entry point
 # =============================================================================
+
+# Load the registry only after all cleanup functions are defined. This keeps
+# the script sourceable for tests and makes every registered module callable
+# independently without changing the command-line entry point.
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/lib/module_registry.sh"
+for module_file in "$SCRIPT_DIR"/modules/*.sh; do
+    # shellcheck source=/dev/null
+    source "$module_file"
+done
 
 main() {
     parse_args "$@"
