@@ -10,6 +10,7 @@ declare -Ag MODULE_RISK=()
 declare -Ag MODULE_AVAILABLE_FN=()
 declare -Ag MODULE_ESTIMATE_FN=()
 declare -Ag MODULE_EXECUTE_FN=()
+declare -Ag MODULE_STATUS=()
 
 register_module() {
     local name="$1"
@@ -41,6 +42,62 @@ module_estimate() {
     local estimate_fn="${MODULE_ESTIMATE_FN[$name]:-}"
     [[ -n "$estimate_fn" ]] || return 1
     "$estimate_fn"
+}
+
+module_analyze() {
+    local name="$1"
+    if [[ -z "${MODULE_EXECUTE_FN[$name]+x}" ]]; then
+        log_message "ERROR" "Unknown cleanup module: $name"
+        return "$EXIT_BAD_ARGS"
+    fi
+
+    if ! module_is_available "$name"; then
+        MODULE_STATUS["$name"]="unavailable"
+        printf '%s\t%s\t%s\n' "$name" "unavailable" "0"
+        return 0
+    fi
+
+    local estimate
+    if ! estimate=$(module_estimate "$name"); then
+        MODULE_STATUS["$name"]="error"
+        log_message "ERROR" "Unable to estimate cleanup module: $name"
+        return "$EXIT_ERROR"
+    fi
+    if [[ ! "$estimate" =~ ^[0-9]+$ ]]; then
+        MODULE_STATUS["$name"]="error"
+        log_message "ERROR" "Invalid estimate from cleanup module: $name"
+        return "$EXIT_ERROR"
+    fi
+
+    MODULE_STATUS["$name"]="available"
+    printf '%s\t%s\t%s\n' "$name" "available" "$estimate"
+}
+
+analyze_registered_modules() {
+    local name
+    for name in "${MODULE_NAMES[@]}"; do
+        module_analyze "$name" || return "$?"
+    done
+}
+
+preview_registered_module() {
+    local name="$1"
+    local previous_dry_run="${DRY_RUN:-false}"
+
+    if ! module_is_available "$name"; then
+        module_skip "$name" "Unavailable on this system"
+        return 0
+    fi
+
+    DRY_RUN=true
+    local result
+    if run_registered_module "$name"; then
+        result=0
+    else
+        result=$?
+    fi
+    DRY_RUN="$previous_dry_run"
+    return "$result"
 }
 
 run_registered_module() {

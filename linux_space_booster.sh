@@ -212,7 +212,9 @@ get_disk_space() {
 get_dir_size() {
     local dir="$1"
     if [[ -d "$dir" ]]; then
-        du -sb "$dir" 2>/dev/null | cut -f1 || echo "0"
+        local size
+        size=$(du -sb "$dir" 2>/dev/null | awk 'NR == 1 {print $1}')
+        printf '%s\n' "${size:-0}"
     else
         echo "0"
     fi

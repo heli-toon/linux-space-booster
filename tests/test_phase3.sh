@@ -61,4 +61,38 @@ for module_name in "${expected_modules[@]}"; do
 done
 printf 'ok - registry listing exposes all modules\n'
 
+analysis=$(analyze_registered_modules)
+while IFS=$'\t' read -r module_name status estimate; do
+    [[ -n "$module_name" ]] || continue
+    [[ "$status" == "available" || "$status" == "unavailable" ]] || {
+        printf 'not ok - %s has a valid analysis status\n' "$module_name" >&2
+        exit 1
+    }
+    [[ "$estimate" =~ ^[0-9]+$ ]] || {
+        printf 'not ok - %s has a numeric estimate\n' "$module_name" >&2
+        exit 1
+    }
+done <<< "$analysis"
+printf 'ok - registry modules expose analysis results\n'
+
+preview_target=$(mktemp)
+preview_module() {
+    printf 'preview\n' >> "$preview_target"
+}
+preview_available() {
+    return 0
+}
+preview_estimate() {
+    printf '0\n'
+}
+register_module "test-preview" "test" "user" "low" \
+    preview_available preview_estimate preview_module
+MODULE_EXECUTE_FN["test-preview"]="preview_module"
+DRY_RUN=false
+preview_registered_module "test-preview"
+assert_equals "$DRY_RUN" "false" "module preview restores dry-run state"
+assert_equals "$(cat "$preview_target")" "preview" \
+    "module preview invokes the registered execute function"
+rm -f -- "$preview_target"
+
 printf 'Phase 3 registry tests passed\n'

@@ -94,6 +94,13 @@ The `--help` output shows each module's category, privilege requirement, and
 risk level. Optional modules are skipped when their tools or paths are not
 available.
 
+Each registered module exposes the same lifecycle through the registry:
+availability detection, a numeric reclaimable-space estimate, dry-run preview,
+and execution. This keeps module analysis and cleanup decisions consistent
+between the command-line and interactive paths. Modules can also be inspected
+without running the entry point by sourcing `linux_space_booster.sh` and using
+`analyze_registered_modules` or `preview_registered_module NAME`.
+
 ### Examples
 
 ```bash
